@@ -2,21 +2,22 @@
 #include <VL53L0X.h>
 #include <SPI.h>
 #include "nRF24L01.h"
-#include "RF24.h" 
-
-#define FORWARD HIGH
-#define BACKWARD LOW
+#include "RF24.h"
+#include "QuatroPortA100.h"
 
 #define ENABLE_MOTORS
+#define TEST_MOTORS
+
 #define ENABLE_DISTANCE_SENSOR
 //#define ENABLE_BT
-#define ENABLE_RF
+//#define ENABLE_RF
 
-#define SCAN_ENABLED
+//#define SCAN_ENABLED
 #define DEFAULT_CHANNEL 0x60
 
 #define MID_DISTANCE 200
 #define CLOSE_DISTANCE 100
+#define IS_DEBUG
 
 #define KEY 1234
 
@@ -29,6 +30,7 @@ const int M2_DIR = 8;
 
 VL53L0X distanceSensor;
 RF24 radio(CE_PIN, CSE_PIN);
+QuatroPortA100 motors(M1_IN, M1_DIR, M2_IN, M2_DIR, true, false);
 
 typedef struct {
   int key;
@@ -52,8 +54,6 @@ int moveSpeed = 100;
 
 int scanChannels();
 void parceCommand(String command);
-void moveForward(int m1Power, int m2Power);
-void moveBackward(int m1Power, int m2Power);
 
 void initRF();
 void runRF();
@@ -69,10 +69,17 @@ int lineIndex = 0;
 void setup() {
   Serial.begin(9600);
 
+  #ifdef IS_DEBUG
+    Serial.println("Starting...");
+  #endif
+
   #ifdef ENABLE_DISTANCE_SENSOR
     Wire.begin();
     distanceSensor.init();
     distanceSensor.setTimeout(500);
+    #ifdef IS_DEBUG
+      Serial.println("Distance sensor enabled");
+    #endif
   #endif
 
   #ifdef ENABLE_MOTORS
@@ -80,6 +87,9 @@ void setup() {
     pinMode(M1_DIR, OUTPUT);
     pinMode(M2_IN, OUTPUT);
     pinMode(M2_DIR, OUTPUT);
+    #ifdef IS_DEBUG
+      Serial.println("Motors enabled");
+    #endif
   #endif
   
   #ifdef ENABLE_RF
@@ -108,32 +118,12 @@ void loop() {
   delay(10);
 }
 
-void moveForward(int m1Power, int m2Power) {
-  analogWrite(M1_IN, 255 - m1Power);
-  digitalWrite(M1_DIR, FORWARD);
-  analogWrite(M2_IN, 255 - m2Power);
-  digitalWrite(M2_DIR, FORWARD);
-}
-
-void moveBackward(int m1Power, int m2Power) {
-  analogWrite(M1_IN, m1Power);
-  digitalWrite(M1_DIR, BACKWARD);
-  analogWrite(M2_IN, m2Power);
-  digitalWrite(M2_DIR, BACKWARD);
-}
-
-void hold() {
-  analogWrite(M1_IN, 0);
-  digitalWrite(M1_DIR, BACKWARD);
-  analogWrite(M2_IN, 0);
-  digitalWrite(M2_DIR, BACKWARD);
-}
-
 void move() {  
   bool isHold = false;
   bool isBackward = false;
 
   #ifdef ENABLE_DISTANCE_SENSOR
+//    Serial.println(distance);
     if (distance > 0 && distance < MID_DISTANCE) {
       if (distance < CLOSE_DISTANCE) {
         isBackward = true;
@@ -142,32 +132,38 @@ void move() {
       }
     }
   #endif
-  
-  int m1ResultPower = m1Power * abs(mY) / 100 * moveSpeed / 100;
-  int m2ResultPower = m2Power * abs(mY) / 100 * moveSpeed / 100;
-  int m1TurnPower = m1ResultPower * abs(mX) / 100 * moveSpeed / 100;
-  int m2TurnPower = m2ResultPower * abs(mX) / 100 * moveSpeed / 100;
-  bool isForward = mY < 0;
-  
-  if (isForward && !isHold && !isBackward) {
-    if (mX > 0) {
-      moveForward(m1ResultPower, m2ResultPower - m2TurnPower);
-    } else if (mX < 0) {
-      moveForward(m1ResultPower - m1TurnPower, m2ResultPower);
-    } else {
-      moveForward(m1ResultPower, m2ResultPower);
+
+  #ifdef TEST_MOTORS
+    motors.test();
+  #endif
+
+  #ifndef TEST_MOTORS
+    int m1ResultPower = m1Power * abs(mY) / 100 * moveSpeed / 100;
+    int m2ResultPower = m2Power * abs(mY) / 100 * moveSpeed / 100;
+    int m1TurnPower = m1ResultPower * abs(mX) / 100 * moveSpeed / 100;
+    int m2TurnPower = m2ResultPower * abs(mX) / 100 * moveSpeed / 100;
+    bool isForward = mY < 0;
+    
+    if (isForward && !isHold && !isBackward) {
+      if (mX > 0) {
+        motors.moveForward(m1ResultPower, m2ResultPower - m2TurnPower);
+      } else if (mX < 0) {
+        motors.moveForward(m1ResultPower - m1TurnPower, m2ResultPower);
+      } else {
+        motors.moveForward(m1ResultPower, m2ResultPower);
+      }
+    } else if (!isForward || isBackward) {
+      if (mX > 0) {
+        motors.moveBackward(m1ResultPower, m2ResultPower - m2TurnPower);
+      } else if (mX < 0) {
+        motors.moveBackward(m1ResultPower - m1TurnPower, m2ResultPower); 
+      } else {
+        motors.moveBackward(m1ResultPower, m2ResultPower);
+      }
+    } else if (isHold) {
+      motors.hold();
     }
-  } else if (!isForward || isBackward) {
-    if (mX > 0) {
-      moveBackward(m1ResultPower, m2ResultPower - m2TurnPower);
-    } else if (mX < 0) {
-      moveBackward(m1ResultPower - m1TurnPower, m2ResultPower); 
-    } else {
-      moveBackward(m1ResultPower, m2ResultPower);
-    }
-  } else if (isHold) {
-    hold();
-  }
+  #endif
 }
 
 void parceCommand(String command) {
@@ -216,7 +212,8 @@ void parceCommand(String command) {
           break;
         }
         case '8': {
-          mX = 0;Serial.println(data.btn1);
+          mX = 0;
+//          Serial.println(data.btn1);
 //    Serial.println(data.btn2);
 //    Serial.println(data.btn3);
 //    Serial.println(data.key);
@@ -239,7 +236,7 @@ void parceCommand(String command) {
       if (command.charAt(1) == '0') {
         moveSpeed = map(constrain(command.substring(2, 5).toInt(), 0, 255), 0, 255, 0, 100);
         Serial.print("Speed: ");
-        Serial.println(moveSpeed);
+//        Serial.println(moveSpeed);
       }
       break;
     }
@@ -294,13 +291,16 @@ void runRF(){
     int transmitterChannel = DEFAULT_CHANNEL;
     
     #ifdef SCAN_ENABLED
-     transmitterChannel = scanChannels();
+      transmitterChannel = scanChannels();
     #endif
+
+    Serial.print("SET CHANNEL: ");
+//    Serial.println(transmitterChannel);
     
     if (transmitterChannel != -1) {
       Serial.println();
       Serial.print("Connected to transmitter: ");
-      Serial.println(transmitterChannel, HEX);
+//      Serial.println(transmitterChannel, HEX);
       radio.setChannel(transmitterChannel);  // Устанавливаем канал
       radio.startListening();  //начинаем слушать эфир, мы приёмный модуль
       isScanning = false;
@@ -319,17 +319,18 @@ void runRF(){
     bool isCorrectKey = data.key == KEY ? true : false;
 
     radio.writeAckPayload(pipeNo, &isCorrectKey, 1 );  // ответ на запрос
-    Serial.println("Recieved: ");
-    Serial.println(data.btn1);
-    Serial.println(data.btn2);
-    Serial.println(data.btn3);
-    Serial.println(data.key);
+//    Serial.println("Recieved: ");
+//    Serial.println(data.btn1);
+//    Serial.println(data.btn2);
+//    Serial.println(data.btn3);
+//    Serial.println(data.key);
 
     parceRfResponse(data);
  }
 }
 
 void parceRfResponse(Data data) {
+  Serial.println("GET DATA");
   if (data.btn1) {
     Serial.println("Left");
     mX = -100;
@@ -355,7 +356,7 @@ int scanChannels () {
   const byte numChannels = 126;
   byte values[numChannels] = {0};
   byte resultValues[numChannels] = {0};
-  unsigned short scanRepeats = 10;
+  unsigned short scanRepeats = 5;
   int resultChannel = -1;
 
   if (!isSetUp) {
@@ -375,22 +376,45 @@ int scanChannels () {
   }
   
   for (int i = 0; i < scanRepeats; i ++) {
+    Serial.println("");
     for (int j = 0; j < numChannels; j ++) {
       radio.setChannel(j);
       radio.startListening();
-      delay(10);
+
+      Serial.print(".");
+
       byte pipeNo;
       while (radio.available(&pipeNo)) {
-        Serial.println("Available");
-        Serial.println(j);
+
+          // TODO stop listening on some timeout                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+          
+//        Serial.println("Available");
+//        Serial.println(j);
         radio.read( &data, sizeof(data) );         // Listen for signal
+
+        Serial.println("");
+        Serial.print("Key: ");
+        Serial.println(data.key);
+        Serial.println("");
+        Serial.print("Pipe: ");
+        Serial.println(pipeNo);
+        Serial.print("Channel: ");
+        Serial.print(j, HEX);
+
         bool isCorrectKey = data.key == KEY ? true : false;  // If keys equal, it is our channel
-        Serial.println("FOUND!");
-        Serial.println(j, HEX);
-        resultChannel = j;
-        i = scanRepeats;
-        j = numChannels;
+//        Serial.println("FOUND!");
+//        Serial.println(j, HEX);
+
+        if (isCorrectKey) {
+          Serial.print("FOUND: ");
+          Serial.println(j);
+//          resultChannel = j;
+            return j; 
+        }
+//        i = scanRepeats;
+//        j = numChannels;
       }
+      delay(200);
       radio.stopListening();
     }
   }
