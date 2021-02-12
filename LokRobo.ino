@@ -5,8 +5,16 @@
 #include "RF24.h"
 #include "QuatroPortA100.h"
 
+#define FORWARD 1
+#define HOLD 0
+#define BACKWARD -1
+
+#define LEFT 1
+#define STRAIGHT 0
+#define RIGHT -1
+
 #define ENABLE_MOTORS
-#define TEST_MOTORS
+//#define TEST_MOTORS
 
 #define ENABLE_DISTANCE_SENSOR
 //#define ENABLE_BT
@@ -119,16 +127,15 @@ void loop() {
 }
 
 void move() {  
-  bool isHold = false;
-  bool isBackward = false;
+  short moveDirection = HOLD;
+  short turnDirection = STRAIGHT;
 
   #ifdef ENABLE_DISTANCE_SENSOR
-//    Serial.println(distance);
     if (distance > 0 && distance < MID_DISTANCE) {
       if (distance < CLOSE_DISTANCE) {
-        isBackward = true;
+        moveDirection = BACKWARD;
       } else {
-        isHold = true; 
+        moveDirection = HOLD; 
       }
     }
   #endif
@@ -142,26 +149,49 @@ void move() {
     int m2ResultPower = m2Power * abs(mY) / 100 * moveSpeed / 100;
     int m1TurnPower = m1ResultPower * abs(mX) / 100 * moveSpeed / 100;
     int m2TurnPower = m2ResultPower * abs(mX) / 100 * moveSpeed / 100;
-    bool isForward = mY < 0;
-    
-    if (isForward && !isHold && !isBackward) {
-      if (mX > 0) {
-        motors.moveForward(m1ResultPower, m2ResultPower - m2TurnPower);
-      } else if (mX < 0) {
-        motors.moveForward(m1ResultPower - m1TurnPower, m2ResultPower);
-      } else {
-        motors.moveForward(m1ResultPower, m2ResultPower);
+
+    if (mY < 0) {
+      moveDirection = FORWARD;
+    } else if (mY > 0) {
+      moveDirection = BACKWARD;
+    } else {
+      moveDirection = HOLD;
+    }
+
+    if (mX < 0) {
+      turnDirection = RIGHT;
+    } else if (mX > 0) {
+      turnDirection = LEFT;
+    } else {
+      turnDirection = STRAIGHT;
+    }
+
+    switch (moveDirection) {
+      case FORWARD: {
+        if (turnDirection == LEFT) {
+          motors.moveForward(m1ResultPower, m2ResultPower - m2TurnPower);
+        } else if (turnDirection == RIGHT) {
+          motors.moveForward(m1ResultPower - m1TurnPower, m2ResultPower);
+        } else {
+          motors.moveForward(m1ResultPower, m2ResultPower);
+        }
+
+        break;
       }
-    } else if (!isForward || isBackward) {
-      if (mX > 0) {
-        motors.moveBackward(m1ResultPower, m2ResultPower - m2TurnPower);
-      } else if (mX < 0) {
-        motors.moveBackward(m1ResultPower - m1TurnPower, m2ResultPower); 
-      } else {
-        motors.moveBackward(m1ResultPower, m2ResultPower);
+      case BACKWARD: {
+        if (turnDirection == LEFT) {
+          motors.moveBackward(m1ResultPower, m2ResultPower - m2TurnPower);
+        } else if (turnDirection == RIGHT) {
+          motors.moveBackward(m1ResultPower - m1TurnPower, m2ResultPower);
+        } else {
+          motors.moveBackward(m1ResultPower, m2ResultPower);
+        }
+
+        break;
       }
-    } else if (isHold) {
-      motors.hold();
+      case HOLD:
+      default:
+        motors.hold();
     }
   #endif
 }
